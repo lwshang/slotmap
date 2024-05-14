@@ -208,10 +208,10 @@ extern crate alloc;
 // So our macros can refer to these.
 #[doc(hidden)]
 pub mod __impl {
-    #[cfg(feature = "serde")]
-    pub use serde::{Deserialize, Deserializer, Serialize, Serializer};
     pub use core::convert::From;
     pub use core::result::Result;
+    #[cfg(feature = "serde")]
+    pub use serde::{Deserialize, Deserializer, Serialize, Serializer};
 }
 
 pub mod basic;
@@ -224,7 +224,7 @@ pub(crate) mod util;
 
 use core::fmt::{self, Debug, Formatter};
 use core::hash::{Hash, Hasher};
-use core::num::NonZeroU32;
+use core::num::NonZeroU16;
 
 #[doc(inline)]
 pub use crate::basic::SlotMap;
@@ -258,26 +258,26 @@ impl<T> Slottable for T {}
 /// unspecified.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct KeyData {
-    idx: u32,
-    version: NonZeroU32,
+    idx: u16,
+    version: NonZeroU16,
 }
 
 impl KeyData {
-    fn new(idx: u32, version: u32) -> Self {
+    fn new(idx: u16, version: u16) -> Self {
         debug_assert!(version > 0);
 
         Self {
             idx,
-            version: unsafe { NonZeroU32::new_unchecked(version | 1) },
+            version: unsafe { NonZeroU16::new_unchecked(version | 1) },
         }
     }
 
     fn null() -> Self {
-        Self::new(core::u32::MAX, 1)
+        Self::new(core::u16::MAX, 1)
     }
 
     fn is_null(self) -> bool {
-        self.idx == core::u32::MAX
+        self.idx == core::u16::MAX
     }
 
     /// Returns the key data as a 64-bit integer. No guarantees about its value
@@ -294,16 +294,16 @@ impl KeyData {
     /// function.
     ///
     /// [`serde`]: crate#serialization-through-serde-no_std-support-and-unstable-features
-    pub fn as_ffi(self) -> u64 {
-        (u64::from(self.version.get()) << 32) | u64::from(self.idx)
+    pub fn as_ffi(self) -> u32 {
+        (u32::from(self.version.get()) << 16) | u32::from(self.idx)
     }
 
     /// Iff `value` is a value received from `k.as_ffi()`, returns a key equal
     /// to `k`. Otherwise the behavior is safe but unspecified.
-    pub fn from_ffi(value: u64) -> Self {
-        let idx = value & 0xffff_ffff;
-        let version = (value >> 32) | 1; // Ensure version is odd.
-        Self::new(idx as u32, version as u32)
+    pub fn from_ffi(value: u32) -> Self {
+        let idx = value & 0xffff;
+        let version = (value >> 16) | 1; // Ensure version is odd.
+        Self::new(idx as u16, version as u16)
     }
 }
 
@@ -319,13 +319,12 @@ impl Default for KeyData {
     }
 }
 
-impl Hash for KeyData
-{
+impl Hash for KeyData {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        // A derived Hash impl would call write_u32 twice. We call write_u64
-        // once, which is beneficial if the hasher implements write_u64
+        // A derived Hash impl would call write_u16 twice. We call write_u32
+        // once, which is beneficial if the hasher implements write_u32
         // explicitly.
-        state.write_u64(self.as_ffi())
+        state.write_u32(self.as_ffi())
     }
 }
 
@@ -527,8 +526,8 @@ mod serialize {
 
     #[derive(Serialize, Deserialize)]
     pub struct SerKey {
-        idx: u32,
-        version: u32,
+        idx: u16,
+        version: u16,
     }
 
     impl Serialize for KeyData {
@@ -552,7 +551,7 @@ mod serialize {
             let mut ser_key: SerKey = Deserialize::deserialize(deserializer)?;
 
             // Ensure a.is_null() && b.is_null() implies a == b.
-            if ser_key.idx == core::u32::MAX {
+            if ser_key.idx == core::u16::MAX {
                 ser_key.version = 1;
             }
 
@@ -572,12 +571,12 @@ mod tests {
         use super::new_key_type;
 
         // Clobber namespace with clashing names - should still work.
-        trait Serialize { }
-        trait Deserialize { }
-        trait Serializer { }
-        trait Deserializer { }
-        trait Key { }
-        trait From { }
+        trait Serialize {}
+        trait Deserialize {}
+        trait Serializer {}
+        trait Deserializer {}
+        trait Key {}
+        trait From {}
         struct Result;
         struct KeyData;
 
@@ -595,9 +594,9 @@ mod tests {
         let is_older = |a, b| is_older_version(a, b);
         assert!(!is_older(42, 42));
         assert!(is_older(0, 1));
-        assert!(is_older(0, 1 << 31));
-        assert!(!is_older(0, (1 << 31) + 1));
-        assert!(is_older(u32::MAX, 0));
+        assert!(is_older(0, 1 << 15));
+        assert!(!is_older(0, (1 << 15) + 1));
+        assert!(is_older(u16::MAX, 0));
     }
 
     #[test]

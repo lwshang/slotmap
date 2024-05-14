@@ -19,25 +19,25 @@ use crate::{DefaultKey, Key, KeyData};
 // Storage inside a slot or metadata for the freelist when vacant.
 union SlotUnion<T> {
     value: ManuallyDrop<T>,
-    next_free: u32,
+    next_free: u16,
 }
 
 // A slot, which represents storage for a value and a current version.
 // Can be occupied or vacant.
 struct Slot<T> {
     u: SlotUnion<T>,
-    version: u32, // Even = vacant, odd = occupied.
+    version: u16, // Even = vacant, odd = occupied.
 }
 
 // Safe API to read a slot.
 enum SlotContent<'a, T: 'a> {
     Occupied(&'a T),
-    Vacant(&'a u32),
+    Vacant(&'a u16),
 }
 
 enum SlotContentMut<'a, T: 'a> {
     OccupiedMut(&'a mut T),
-    VacantMut(&'a mut u32),
+    VacantMut(&'a mut u16),
 }
 
 use self::SlotContent::{Occupied, Vacant};
@@ -100,12 +100,12 @@ impl<T: Clone> Clone for Slot<T> {
             (OccupiedMut(self_val), Occupied(source_val)) => self_val.clone_from(source_val),
             (VacantMut(self_next_free), Vacant(&source_next_free)) => {
                 *self_next_free = source_next_free
-            },
+            }
             (_, Occupied(value)) => {
                 self.u = SlotUnion {
                     value: ManuallyDrop::new(value.clone()),
                 }
-            },
+            }
             (_, Vacant(&next_free)) => self.u = SlotUnion { next_free },
         }
         self.version = source.version;
@@ -129,8 +129,8 @@ impl<T: fmt::Debug> fmt::Debug for Slot<T> {
 #[derive(Debug)]
 pub struct SlotMap<K: Key, V> {
     slots: Vec<Slot<V>>,
-    free_head: u32,
-    num_elems: u32,
+    free_head: u16,
+    num_elems: u16,
     _k: PhantomData<fn(K) -> K>,
 }
 
@@ -344,7 +344,10 @@ impl<K: Key, V> SlotMap<K, V> {
     /// ```
     #[inline(always)]
     pub fn insert(&mut self, value: V) -> K {
-        unsafe { self.try_insert_with_key::<_, Never>(move |_| Ok(value)).unwrap_unchecked_() }
+        unsafe {
+            self.try_insert_with_key::<_, Never>(move |_| Ok(value))
+                .unwrap_unchecked_()
+        }
     }
 
     /// Inserts a value given by `f` into the slot map. The key where the
@@ -369,7 +372,10 @@ impl<K: Key, V> SlotMap<K, V> {
     where
         F: FnOnce(K) -> V,
     {
-        unsafe { self.try_insert_with_key::<_, Never>(move |k| Ok(f(k))).unwrap_unchecked_() }
+        unsafe {
+            self.try_insert_with_key::<_, Never>(move |k| Ok(f(k)))
+                .unwrap_unchecked_()
+        }
     }
 
     /// Inserts a value given by `f` into the slot map. The key where the
@@ -399,7 +405,7 @@ impl<K: Key, V> SlotMap<K, V> {
     {
         // In case f panics, we don't make any changes until we have the value.
         let new_num_elems = self.num_elems + 1;
-        if new_num_elems == core::u32::MAX {
+        if new_num_elems == core::u16::MAX {
             panic!("SlotMap number of elements overflow");
         }
 
@@ -421,7 +427,7 @@ impl<K: Key, V> SlotMap<K, V> {
         }
 
         let version = 1;
-        let kd = KeyData::new(self.slots.len() as u32, version);
+        let kd = KeyData::new(self.slots.len() as u16, version);
 
         // Create new slot before adjusting freelist in case f or the allocation panics or errors.
         self.slots.push(Slot {
@@ -446,7 +452,7 @@ impl<K: Key, V> SlotMap<K, V> {
 
         // Maintain freelist.
         slot.u.next_free = self.free_head;
-        self.free_head = idx as u32;
+        self.free_head = idx as u16;
         self.num_elems -= 1;
         slot.version = slot.version.wrapping_add(1);
 
@@ -511,7 +517,7 @@ impl<K: Key, V> SlotMap<K, V> {
             let version = slot.version;
 
             let should_remove = if let OccupiedMut(value) = slot.get_mut() {
-                let key = KeyData::new(i as u32, version).into();
+                let key = KeyData::new(i as u16, version).into();
                 !f(key, value)
             } else {
                 false
@@ -655,7 +661,11 @@ impl<K: Key, V> SlotMap<K, V> {
     /// ```
     pub unsafe fn get_unchecked_mut(&mut self, key: K) -> &mut V {
         debug_assert!(self.contains_key(key));
-        &mut self.slots.get_unchecked_mut(key.data().idx as usize).u.value
+        &mut self
+            .slots
+            .get_unchecked_mut(key.data().idx as usize)
+            .u
+            .value
     }
 
     /// Returns mutable references to the values corresponding to the given
@@ -1042,7 +1052,7 @@ impl<'a, K: Key, V> Iterator for Drain<'a, K, V> {
             unsafe {
                 let slot = self.sm.slots.get_unchecked(idx);
                 if slot.occupied() {
-                    let kd = KeyData::new(idx as u32, slot.version);
+                    let kd = KeyData::new(idx as u16, slot.version);
                     return Some((kd.into(), self.sm.remove_from_slot(idx)));
                 }
             }
@@ -1068,7 +1078,7 @@ impl<K: Key, V> Iterator for IntoIter<K, V> {
     fn next(&mut self) -> Option<(K, V)> {
         while let Some((idx, mut slot)) = self.slots.next() {
             if slot.occupied() {
-                let kd = KeyData::new(idx as u32, slot.version);
+                let kd = KeyData::new(idx as u16, slot.version);
 
                 // Prevent dropping after extracting the value.
                 slot.version = 0;
@@ -1095,7 +1105,7 @@ impl<'a, K: Key, V> Iterator for Iter<'a, K, V> {
     fn next(&mut self) -> Option<(K, &'a V)> {
         while let Some((idx, slot)) = self.slots.next() {
             if let Occupied(value) = slot.get() {
-                let kd = KeyData::new(idx as u32, slot.version);
+                let kd = KeyData::new(idx as u16, slot.version);
                 self.num_left -= 1;
                 return Some((kd.into(), value));
             }
@@ -1116,7 +1126,7 @@ impl<'a, K: Key, V> Iterator for IterMut<'a, K, V> {
         while let Some((idx, slot)) = self.slots.next() {
             let version = slot.version;
             if let OccupiedMut(value) = slot.get_mut() {
-                let kd = KeyData::new(idx as u32, version);
+                let kd = KeyData::new(idx as u16, version);
                 self.num_left -= 1;
                 return Some((kd.into(), value));
             }
@@ -1226,7 +1236,7 @@ mod serialize {
     #[derive(Serialize, Deserialize)]
     struct SerdeSlot<T> {
         value: Option<T>,
-        version: u32,
+        version: u16,
     }
 
     impl<T: Serialize> Serialize for Slot<T> {
@@ -1290,7 +1300,7 @@ mod serialize {
             D: Deserializer<'de>,
         {
             let mut slots: Vec<Slot<V>> = Deserialize::deserialize(deserializer)?;
-            if slots.len() >= u32::max_value() as usize {
+            if slots.len() >= u16::max_value() as usize {
                 return Err(de::Error::custom(&"too many slots"));
             }
 
@@ -1309,7 +1319,7 @@ mod serialize {
                 if slot.occupied() {
                     num_elems += 1;
                 } else {
-                    slot.u.next_free = next_free as u32;
+                    slot.u.next_free = next_free as u16;
                     next_free = i + 1;
                 }
             }
@@ -1317,7 +1327,7 @@ mod serialize {
             Ok(Self {
                 num_elems,
                 slots,
-                free_head: next_free as u32,
+                free_head: next_free as u16,
                 _k: PhantomData,
             })
         }
@@ -1423,10 +1433,10 @@ mod tests {
     }
 
     quickcheck! {
-        fn qc_slotmap_equiv_hashmap(operations: Vec<(u8, u32)>) -> bool {
+        fn qc_slotmap_equiv_hashmap(operations: Vec<(u8, u16)>) -> bool {
             let mut hm = HashMap::new();
             let mut hm_keys = Vec::new();
-            let mut unique_key = 0u32;
+            let mut unique_key = 0u16;
             let mut sm = SlotMap::new();
             let mut sm_keys = Vec::new();
 

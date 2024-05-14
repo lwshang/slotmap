@@ -22,10 +22,10 @@ use crate::{DefaultKey, Key, KeyData};
 #[derive(Debug, Clone)]
 struct Slot {
     // Even = vacant, odd = occupied.
-    version: u32,
+    version: u16,
 
     // An index when occupied, the next free slot otherwise.
-    idx_or_free: u32,
+    idx_or_free: u16,
 }
 
 /// Dense slot map, storage with stable unique keys.
@@ -36,7 +36,7 @@ pub struct DenseSlotMap<K: Key, V> {
     keys: Vec<K>,
     values: Vec<V>,
     slots: Vec<Slot>,
-    free_head: u32,
+    free_head: u16,
 }
 
 impl<V> DenseSlotMap<DefaultKey, V> {
@@ -252,7 +252,10 @@ impl<K: Key, V> DenseSlotMap<K, V> {
     /// ```
     #[inline(always)]
     pub fn insert(&mut self, value: V) -> K {
-        unsafe { self.try_insert_with_key::<_, Never>(move |_| Ok(value)).unwrap_unchecked_() }
+        unsafe {
+            self.try_insert_with_key::<_, Never>(move |_| Ok(value))
+                .unwrap_unchecked_()
+        }
     }
 
     /// Inserts a value given by `f` into the slot map. The key where the
@@ -277,7 +280,10 @@ impl<K: Key, V> DenseSlotMap<K, V> {
     where
         F: FnOnce(K) -> V,
     {
-        unsafe { self.try_insert_with_key::<_, Never>(move |k| Ok(f(k))).unwrap_unchecked_() }
+        unsafe {
+            self.try_insert_with_key::<_, Never>(move |k| Ok(f(k)))
+                .unwrap_unchecked_()
+        }
     }
 
     /// Inserts a value given by `f` into the slot map. The key where the
@@ -305,7 +311,7 @@ impl<K: Key, V> DenseSlotMap<K, V> {
     where
         F: FnOnce(K) -> Result<V, E>,
     {
-        if self.len() >= (core::u32::MAX - 1) as usize {
+        if self.len() >= (core::u16::MAX - 1) as usize {
             panic!("DenseSlotMap number of elements overflow");
         }
 
@@ -319,7 +325,7 @@ impl<K: Key, V> DenseSlotMap<K, V> {
             self.values.push(f(key)?);
             self.keys.push(key);
             self.free_head = slot.idx_or_free;
-            slot.idx_or_free = self.keys.len() as u32 - 1;
+            slot.idx_or_free = self.keys.len() as u16 - 1;
             slot.version = occupied_version;
             return Ok(key);
         }
@@ -330,21 +336,21 @@ impl<K: Key, V> DenseSlotMap<K, V> {
         self.keys.push(key);
         self.slots.push(Slot {
             version: 1,
-            idx_or_free: self.keys.len() as u32 - 1,
+            idx_or_free: self.keys.len() as u16 - 1,
         });
-        self.free_head = self.slots.len() as u32;
+        self.free_head = self.slots.len() as u16;
         Ok(key)
     }
 
     // Helper function to add a slot to the freelist. Returns the index that
     // was stored in the slot.
     #[inline(always)]
-    fn free_slot(&mut self, slot_idx: usize) -> u32 {
+    fn free_slot(&mut self, slot_idx: usize) -> u16 {
         let slot = &mut self.slots[slot_idx];
         let value_idx = slot.idx_or_free;
         slot.version = slot.version.wrapping_add(1);
         slot.idx_or_free = self.free_head;
-        self.free_head = slot_idx as u32;
+        self.free_head = slot_idx as u16;
         value_idx
     }
 
@@ -515,7 +521,10 @@ impl<K: Key, V> DenseSlotMap<K, V> {
     /// ```
     pub unsafe fn get_unchecked(&self, key: K) -> &V {
         debug_assert!(self.contains_key(key));
-        let idx = self.slots.get_unchecked(key.data().idx as usize).idx_or_free;
+        let idx = self
+            .slots
+            .get_unchecked(key.data().idx as usize)
+            .idx_or_free;
         &self.values.get_unchecked(idx as usize)
     }
 
@@ -565,7 +574,10 @@ impl<K: Key, V> DenseSlotMap<K, V> {
     /// ```
     pub unsafe fn get_unchecked_mut(&mut self, key: K) -> &mut V {
         debug_assert!(self.contains_key(key));
-        let idx = self.slots.get_unchecked(key.data().idx as usize).idx_or_free;
+        let idx = self
+            .slots
+            .get_unchecked(key.data().idx as usize)
+            .idx_or_free;
         self.values.get_unchecked_mut(idx as usize)
     }
 
@@ -1097,7 +1109,7 @@ mod serialize {
     #[derive(Serialize, Deserialize)]
     struct SerdeSlot<T> {
         value: Option<T>,
-        version: u32,
+        version: u16,
     }
 
     impl<K: Key, V: Serialize> Serialize for DenseSlotMap<K, V> {
@@ -1127,12 +1139,15 @@ mod serialize {
             D: Deserializer<'de>,
         {
             let serde_slots: Vec<SerdeSlot<V>> = Deserialize::deserialize(deserializer)?;
-            if serde_slots.len() >= u32::max_value() as usize {
+            if serde_slots.len() >= u16::max_value() as usize {
                 return Err(de::Error::custom(&"too many slots"));
             }
 
             // Ensure the first slot exists and is empty for the sentinel.
-            if serde_slots.get(0).map_or(true, |slot| slot.version % 2 == 1) {
+            if serde_slots
+                .get(0)
+                .map_or(true, |slot| slot.version % 2 == 1)
+            {
                 return Err(de::Error::custom(&"first slot not empty"));
             }
 
@@ -1153,17 +1168,17 @@ mod serialize {
                 }
 
                 if let Some(value) = serde_slot.value {
-                    let kd = KeyData::new(i as u32, serde_slot.version);
+                    let kd = KeyData::new(i as u16, serde_slot.version);
                     keys.push(kd.into());
                     values.push(value);
                     slots.push(Slot {
                         version: serde_slot.version,
-                        idx_or_free: (keys.len() - 1) as u32,
+                        idx_or_free: (keys.len() - 1) as u16,
                     });
                 } else {
                     slots.push(Slot {
                         version: serde_slot.version,
-                        idx_or_free: next_free as u32,
+                        idx_or_free: next_free as u16,
                     });
                     next_free = i;
                 }
@@ -1173,7 +1188,7 @@ mod serialize {
                 keys,
                 values,
                 slots,
-                free_head: next_free as u32,
+                free_head: next_free as u16,
             })
         }
     }
@@ -1277,10 +1292,10 @@ mod tests {
     }
 
     quickcheck! {
-        fn qc_slotmap_equiv_hashmap(operations: Vec<(u8, u32)>) -> bool {
+        fn qc_slotmap_equiv_hashmap(operations: Vec<(u8, u16)>) -> bool {
             let mut hm = HashMap::new();
             let mut hm_keys = Vec::new();
-            let mut unique_key = 0u32;
+            let mut unique_key = 0u16;
             let mut sm = DenseSlotMap::new();
             let mut sm_keys = Vec::new();
 
