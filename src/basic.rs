@@ -99,7 +99,7 @@ impl<T: Clone> Clone for Slot<T> {
         match (self.get_mut(), source.get()) {
             (OccupiedMut(self_val), Occupied(source_val)) => self_val.clone_from(source_val),
             (VacantMut(self_next_free), Vacant(&source_next_free)) => {
-                *self_next_free = source_next_free
+                *self_next_free = source_next_free;
             }
             (_, Occupied(value)) => {
                 self.u = SlotUnion {
@@ -405,9 +405,10 @@ impl<K: Key, V> SlotMap<K, V> {
     {
         // In case f panics, we don't make any changes until we have the value.
         let new_num_elems = self.num_elems + 1;
-        if new_num_elems == core::u16::MAX {
-            panic!("SlotMap number of elements overflow");
-        }
+        assert!(
+            new_num_elems != core::u16::MAX,
+            "SlotMap number of elements overflow"
+        );
 
         if let Some(slot) = self.slots.get_mut(self.free_head as usize) {
             let occupied_version = slot.version | 1;
@@ -1076,7 +1077,7 @@ impl<K: Key, V> Iterator for IntoIter<K, V> {
     type Item = (K, V);
 
     fn next(&mut self) -> Option<(K, V)> {
-        while let Some((idx, mut slot)) = self.slots.next() {
+        for (idx, mut slot) in self.slots.by_ref() {
             if slot.occupied() {
                 let kd = KeyData::new(idx as u16, slot.version);
 
@@ -1103,7 +1104,7 @@ impl<'a, K: Key, V> Iterator for Iter<'a, K, V> {
     type Item = (K, &'a V);
 
     fn next(&mut self) -> Option<(K, &'a V)> {
-        while let Some((idx, slot)) = self.slots.next() {
+        for (idx, slot) in self.slots.by_ref() {
             if let Occupied(value) = slot.get() {
                 let kd = KeyData::new(idx as u16, slot.version);
                 self.num_left -= 1;
@@ -1123,7 +1124,7 @@ impl<'a, K: Key, V> Iterator for IterMut<'a, K, V> {
     type Item = (K, &'a mut V);
 
     fn next(&mut self) -> Option<(K, &'a mut V)> {
-        while let Some((idx, slot)) = self.slots.next() {
+        for (idx, slot) in self.slots.by_ref() {
             let version = slot.version;
             if let OccupiedMut(value) = slot.get_mut() {
                 let kd = KeyData::new(idx as u16, version);
@@ -1343,8 +1344,10 @@ mod tests {
     use super::*;
 
     #[derive(Clone)]
+    #[cfg(all(nightly, feature = "unstable"))]
     struct CountDrop<'a>(&'a std::cell::RefCell<usize>);
 
+    #[cfg(all(nightly, feature = "unstable"))]
     impl<'a> Drop for CountDrop<'a> {
         fn drop(&mut self) {
             *self.0.borrow_mut() += 1;

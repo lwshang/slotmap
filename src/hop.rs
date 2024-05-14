@@ -1073,7 +1073,7 @@ impl<'a, K: 'a + Key, V: 'a> Clone for Iter<'a, K, V> {
             cur: self.cur,
             num_left: self.num_left,
             slots: self.slots,
-            _k: self._k.clone(),
+            _k: self._k,
         }
     }
 }
@@ -1135,7 +1135,7 @@ impl<'a, K: Key, V> Iterator for Drain<'a, K, V> {
     fn next(&mut self) -> Option<(K, V)> {
         // All unchecked indices are safe due to the invariants of the freelist
         // and that self.sm.len() guarantees there is another element.
-        if self.sm.len() == 0 {
+        if self.sm.is_empty() {
             return None;
         }
 
@@ -1488,8 +1488,10 @@ mod tests {
     use super::*;
 
     #[derive(Clone)]
+    #[cfg(all(nightly, feature = "unstable"))]
     struct CountDrop<'a>(&'a std::cell::RefCell<usize>);
 
+    #[cfg(all(nightly, feature = "unstable"))]
     impl<'a> Drop for CountDrop<'a> {
         fn drop(&mut self) {
             *self.0.borrow_mut() += 1;

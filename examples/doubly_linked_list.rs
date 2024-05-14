@@ -19,6 +19,12 @@ pub struct List<T> {
     tail: ListKey,
 }
 
+impl<T> Default for List<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T> List<T> {
     pub fn new() -> Self {
         Self {
@@ -30,6 +36,10 @@ impl<T> List<T> {
 
     pub fn len(&self) -> usize {
         self.sm.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.sm.is_empty()
     }
 
     pub fn push_head(&mut self, value: T) -> ListKey {

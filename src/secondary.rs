@@ -1059,6 +1059,7 @@ impl<'a, K: Key, V: Default> Entry<'a, K, V> {
     /// assert_eq!(sec[k], None)
     /// ```
     pub fn or_default(self) -> &'a mut V {
+        #[allow(clippy::unwrap_or_default)]
         self.or_insert_with(Default::default)
     }
 }
@@ -1411,7 +1412,7 @@ impl<K: Key, V> Iterator for IntoIter<K, V> {
     type Item = (K, V);
 
     fn next(&mut self) -> Option<(K, V)> {
-        while let Some((idx, mut slot)) = self.slots.next() {
+        for (idx, mut slot) in self.slots.by_ref() {
             if let Occupied { value, version } = replace(&mut slot, Slot::new_vacant()) {
                 self.num_left -= 1;
                 let key = KeyData::new(idx as u16, version.get()).into();
@@ -1431,7 +1432,7 @@ impl<'a, K: Key, V> Iterator for Iter<'a, K, V> {
     type Item = (K, &'a V);
 
     fn next(&mut self) -> Option<(K, &'a V)> {
-        while let Some((idx, slot)) = self.slots.next() {
+        for (idx, slot) in self.slots.by_ref() {
             if let Occupied { value, version } = slot {
                 self.num_left -= 1;
                 let key = KeyData::new(idx as u16, version.get()).into();
@@ -1451,7 +1452,7 @@ impl<'a, K: Key, V> Iterator for IterMut<'a, K, V> {
     type Item = (K, &'a mut V);
 
     fn next(&mut self) -> Option<(K, &'a mut V)> {
-        while let Some((idx, slot)) = self.slots.next() {
+        for (idx, slot) in self.slots.by_ref() {
             if let Occupied { value, version } = slot {
                 let key = KeyData::new(idx as u16, version.get()).into();
                 self.num_left -= 1;

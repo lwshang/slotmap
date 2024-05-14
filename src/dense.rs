@@ -423,8 +423,8 @@ impl<K: Key, V> DenseSlotMap<K, V> {
         let mut i = 0;
         while i < self.keys.len() {
             let (should_keep, slot_idx) = {
-                let (kd, mut value) = (self.keys[i].data(), &mut self.values[i]);
-                (f(kd.into(), &mut value), kd.idx as usize)
+                let (kd, value) = (self.keys[i].data(), &mut self.values[i]);
+                (f(kd.into(), value), kd.idx as usize)
             };
 
             if should_keep {
@@ -525,7 +525,7 @@ impl<K: Key, V> DenseSlotMap<K, V> {
             .slots
             .get_unchecked(key.data().idx as usize)
             .idx_or_free;
-        &self.values.get_unchecked(idx as usize)
+        self.values.get_unchecked(idx as usize)
     }
 
     /// Returns a mutable reference to the value corresponding to the key.

@@ -1060,6 +1060,7 @@ impl<'a, K: Key, V: Default> Entry<'a, K, V> {
     /// assert_eq!(sec[k], None)
     /// ```
     pub fn or_default(self) -> &'a mut V {
+        #[allow(clippy::unwrap_or_default)]
         self.or_insert_with(Default::default)
     }
 }
